@@ -1,10 +1,10 @@
 // ============================================================
 // Agrovite API — Express + MySQL (mysql2) server
 // ============================================================
-require('dotenv').config();
+require('dotenv').config(); 
 
 const express = require('express');
-const mysql = require('mysql2/promise');
+const {Pool} = require('pg');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const cors = require('cors');
@@ -14,11 +14,7 @@ const app = express();
 app.use(cors({origin:"https://agrovite-new-2.onrender.com"}));
 app.use(express.json());
 
-// ------------------------------------------------------------
-// Database pool
-// ------------------------------------------------------------
-import pkg from 'pg';
-const { Pool } = pkg;
+
 
 // Database pool
 const pool = new Pool({
