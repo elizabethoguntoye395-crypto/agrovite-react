@@ -17,15 +17,19 @@ app.use(express.json());
 // ------------------------------------------------------------
 // Database pool
 // ------------------------------------------------------------
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'agrovite',
-  waitForConnections: true,
-  connectionLimit: 10,
+import pkg from 'pg';
+const { Pool } = pkg;
+
+// Database pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
+
+// Test it
+pool.query('SELECT NOW()')
+  .then(() => console.log('Postgres connected'))
+  .catch(err => console.error('DB Error:', err));
 
 // ------------------------------------------------------------
 // Admin auth

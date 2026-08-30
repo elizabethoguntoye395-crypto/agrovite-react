@@ -14,7 +14,8 @@
     "express": "^5.2.1",
     "module": "^2.0.0",
     "mysql2": "^3.23.3",
-    "nodemailer": "^9.0.5"
+    "nodemailer": "^9.0.5",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
