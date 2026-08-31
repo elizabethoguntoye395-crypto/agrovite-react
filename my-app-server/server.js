@@ -313,7 +313,7 @@ app.post('/api/login', async (req, res) => {
       });
     }
 
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    const { rows } = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
     if (rows.length === 0) {
       recordFailedAttempt(email);
       return res.status(401).json({ error: 'Invalid email or password' });
@@ -370,7 +370,7 @@ app.post('/api/verify-otp', async (req, res) => {
     }
 
     otpStore.delete(email);
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       'SELECT id, full_name, email, role, location, created_at FROM users WHERE email = ?',
       [email]
     );
@@ -436,7 +436,7 @@ app.post('/api/admin/login', (req, res) => {
 // GET /api/users — admin-only (no public route exists for user accounts)
 app.get('/api/users', requireAdmin, async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       'SELECT id, full_name, email, role, location, created_at FROM users ORDER BY id DESC'
     );
     res.json(rows);
@@ -448,7 +448,7 @@ app.get('/api/users', requireAdmin, async (req, res) => {
 
 app.get('/api/users/:id', requireAdmin, async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       'SELECT id, full_name, email, role, location, created_at FROM users WHERE id = ?',
       [req.params.id]
     );
@@ -465,7 +465,7 @@ app.get('/api/users/:id', requireAdmin, async (req, res) => {
 // exposing the full users table (no email, no password_hash).
 app.get('/api/public-profile/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const { rows } = await pool.query(
       'SELECT id, full_name, role, location FROM users WHERE id = ?',
       [req.params.id]
     );
@@ -486,7 +486,7 @@ for (const table of Object.keys(TABLES)) {
   // GET /api/<table>
   app.get(`/api/${table}`, async (req, res) => {
     try {
-      const [rows] = await pool.query(`SELECT * FROM ${table} ORDER BY id DESC`);
+      const { rows } = await pool.query(`SELECT * FROM ${table} ORDER BY id DESC`);
       res.json(rows);
     } catch (err) {
       console.error(`GET /api/${table} error:`, err);
@@ -497,7 +497,7 @@ for (const table of Object.keys(TABLES)) {
   // GET /api/<table>/:id
   app.get(`/api/${table}/:id`, async (req, res) => {
     try {
-      const [rows] = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
+      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
       res.json(rows[0]);
     } catch (err) {
@@ -530,7 +530,7 @@ for (const [table, config] of Object.entries(TABLES)) {
 
       const { sql, values } = buildInsert(table, data);
       const [result] = await pool.query(sql, values);
-      const [rows] = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [result.insertId]);
+      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [result.insertId]);
 
       if (table === 'users') delete rows[0].password_hash;
       res.status(201).json(rows[0]);
@@ -566,7 +566,7 @@ for (const [table, config] of Object.entries(TABLES)) {
       const [result] = await pool.query(sql, values);
       if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
 
-      const [rows] = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
+      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
       if (table === 'users') delete rows[0].password_hash;
       res.json(rows[0]);
     } catch (err) {
