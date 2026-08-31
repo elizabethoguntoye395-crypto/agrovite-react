@@ -1,10 +1,10 @@
 // ============================================================
-// Agrovite API — Express + MySQL (mysql2) server
+// Agrovite API — Express + PostgreSQL (pg) server
 // ============================================================
-require('dotenv').config(); 
+require('dotenv').config();
 
 const express = require('express');
-const {Pool} = require('pg');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const cors = require('cors');
@@ -20,8 +20,6 @@ app.use(cors({
 }));
 app.use(express.json());
 
-
-
 // Database pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -35,10 +33,6 @@ pool.query('SELECT NOW()')
 
 // ------------------------------------------------------------
 // Admin auth
-// Simple in-memory token store — POST /api/admin/login checks
-// ADMIN_PASSWORD and hands back a random token. Send it back on
-// protected routes as:  Authorization: Bearer <token>
-// (or the x-admin-token header). Tokens reset on server restart.
 // ------------------------------------------------------------
 const adminTokens = new Set();
 
@@ -54,17 +48,11 @@ function requireAdmin(req, res, next) {
 }
 
 // ------------------------------------------------------------
-// Login-attempt lockout (brute-force protection)
-// In-memory, keyed by email — same simple pattern as adminTokens
-// above. After MAX_FAILED_ATTEMPTS wrong passwords in a row, that
-// email is locked out for LOCKOUT_MINUTES. Resets on server restart
-// (fine for this scale — a real production system would move this
-// to the database or a store like Redis so it survives restarts and
-// works across multiple server instances).
+// Login-attempt lockout
 // ------------------------------------------------------------
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
-const loginAttempts = new Map(); // email -> { count, lockedUntil }
+const loginAttempts = new Map();
 
 function checkLockout(email) {
   const entry = loginAttempts.get(email);
@@ -74,7 +62,7 @@ function checkLockout(email) {
     return { locked: true, minutesLeft };
   }
   if (entry.lockedUntil && entry.lockedUntil <= Date.now()) {
-    loginAttempts.delete(email); // lockout expired — start fresh
+    loginAttempts.delete(email);
   }
   return { locked: false };
 }
@@ -94,8 +82,7 @@ function clearFailedAttempts(email) {
 }
 
 // ------------------------------------------------------------
-// Password strength check — used on registration.
-// Minimum 8 characters, at least one letter and one number.
+// Password strength check
 // ------------------------------------------------------------
 function isPasswordStrongEnough(password) {
   if (typeof password !== 'string' || password.length < 8) return false;
@@ -106,15 +93,6 @@ function isPasswordStrongEnough(password) {
 
 // ------------------------------------------------------------
 // Email OTP verification
-// After a correct password (login) or a successful signup, the
-// user must enter a 6-digit code sent to their real inbox before
-// they get a session — this is what actually proves the account
-// belongs to that email address.
-//
-// In-memory store, same pattern as adminTokens/loginAttempts above:
-// email -> { code, expiresAt, attempts, lastSentAt }
-// Resets on server restart — fine at this scale; a production
-// system would move this to the database or Redis.
 // ------------------------------------------------------------
 const OTP_EXPIRY_MINUTES = 5;
 const MAX_OTP_ATTEMPTS = 3;
@@ -122,12 +100,9 @@ const RESEND_COOLDOWN_SECONDS = 60;
 const otpStore = new Map();
 
 function generateOtp() {
-  return String(Math.floor(100000 + Math.random() * 900000)); // 6 digits, no leading zero issues
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-// Mailer — uses real SMTP if configured in .env, otherwise falls back
-// to printing the code to the server console so you can still test
-// the flow locally before setting up a real email provider.
 const smtpConfigured = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS;
 const transporter = smtpConfigured
   ? nodemailer.createTransport({
@@ -138,9 +113,6 @@ const transporter = smtpConfigured
     })
   : null;
 
-// Generic mail sender — falls back to console logging if SMTP isn't
-// configured, same as the OTP path, so this is testable with zero
-// email setup.
 async function sendMail({ to, subject, text, html }) {
   if (!transporter) {
     console.log(`[DEV — no SMTP configured] Email to ${to} — ${subject}\n${text}`);
@@ -169,12 +141,8 @@ async function issueOtp(email) {
   await sendOtpEmail(email, code);
 }
 
-// Notify every buyer by email when a new produce listing is created.
-// Failures for individual recipients are logged but never fail the
-// request that created the listing — a bad email address shouldn't
-// block the listing itself from being saved.
 async function notifyBuyersOfNewListing(listing) {
-  const [buyers] = await pool.query('SELECT email, full_name FROM users WHERE role = ?', ['buyer']);
+  const { rows: buyers } = await pool.query('SELECT email, full_name FROM users WHERE role = $1', ['buyer']);
   const subject = `New on Agrovite: ${listing.crop_name}${listing.grade ? ', ' + listing.grade : ''}`;
   const priceLine = `${listing.price} ${listing.currency || 'NGN'} / ${listing.unit}`;
   const text = `A new listing was just posted on Agrovite:\n\n${listing.crop_name}${listing.grade ? ', ' + listing.grade : ''}\nLocation: ${listing.location}\nPrice: ${priceLine}\n\nLog in to view it and message the seller.`;
@@ -194,10 +162,7 @@ async function notifyBuyersOfNewListing(listing) {
 }
 
 // ------------------------------------------------------------
-// Table config — drives the generic public GET / admin
-// POST-PUT-DELETE routes below. Keeping column names in one
-// hardcoded place (not taken from user input) is what keeps the
-// dynamic SQL below injection-safe.
+// Table config
 // ------------------------------------------------------------
 const TABLES = {
   produce_listings: {
@@ -224,10 +189,8 @@ const TABLES = {
   waitlist_signups: {
     insertable: ['email'],
   },
-  // users is admin-writable too (POST/PUT/DELETE), but has NO public
-  // GET route — see registerPublicGet() below, which skips it.
   users: {
-    insertable: ['full_name', 'email', 'role', 'location'], // password handled separately (hashed)
+    insertable: ['full_name', 'email', 'role', 'location'],
     hasPassword: true,
   },
 };
@@ -245,16 +208,16 @@ function pickFields(body, allowedFields) {
 
 function buildInsert(table, data) {
   const cols = Object.keys(data);
-  const placeholders = cols.map(() => '?').join(', ');
-  const sql = `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`;
+  const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+  const sql = `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`;
   const values = cols.map((c) => data[c]);
   return { sql, values };
 }
 
 function buildUpdate(table, data, id) {
   const cols = Object.keys(data);
-  const setClause = cols.map((c) => `${c} = ?`).join(', ');
-  const sql = `UPDATE ${table} SET ${setClause} WHERE id = ?`;
+  const setClause = cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+  const sql = `UPDATE ${table} SET ${setClause} WHERE id = $${cols.length + 1} RETURNING *`;
   const values = [...cols.map((c) => data[c]), id];
   return { sql, values };
 }
@@ -263,7 +226,6 @@ function buildUpdate(table, data, id) {
 // AUTH — user register / login
 // ============================================================
 
-// POST /api/register
 app.post('/api/register', async (req, res) => {
   try {
     const { full_name, email, password, role, location } = req.body;
@@ -278,15 +240,15 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({ error: 'role must be farmer, buyer, or transporter' });
     }
 
-    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+    const { rows: existing } = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.length > 0) {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
     const password_hash = await bcrypt.hash(password, 10);
 
-    const [result] = await pool.query(
-      'INSERT INTO users (full_name, email, password_hash, role, location) VALUES (?, ?, ?, ?, ?)',
+    await pool.query(
+      'INSERT INTO users (full_name, email, password_hash, role, location) VALUES ($1, $2, $3, $4, $5)',
       [full_name, email, password_hash, role || 'buyer', location || null]
     );
 
@@ -298,7 +260,6 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// POST /api/login
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -313,7 +274,7 @@ app.post('/api/login', async (req, res) => {
       });
     }
 
-    const { rows } = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     if (rows.length === 0) {
       recordFailedAttempt(email);
       return res.status(401).json({ error: 'Invalid email or password' });
@@ -340,8 +301,6 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// POST /api/verify-otp — completes login/registration once the
-// correct 6-digit code (sent by issueOtp above) is entered.
 app.post('/api/verify-otp', async (req, res) => {
   try {
     const { email, code } = req.body;
@@ -371,7 +330,7 @@ app.post('/api/verify-otp', async (req, res) => {
 
     otpStore.delete(email);
     const { rows } = await pool.query(
-      'SELECT id, full_name, email, role, location, created_at FROM users WHERE email = ?',
+      'SELECT id, full_name, email, role, location, created_at FROM users WHERE email = $1',
       [email]
     );
     if (rows.length === 0) {
@@ -384,8 +343,6 @@ app.post('/api/verify-otp', async (req, res) => {
   }
 });
 
-// POST /api/resend-otp — rate limited to one resend per
-// RESEND_COOLDOWN_SECONDS per email.
 app.post('/api/resend-otp', async (req, res) => {
   try {
     const { email } = req.body;
@@ -410,13 +367,10 @@ app.post('/api/resend-otp', async (req, res) => {
   }
 });
 
-
-
 // ============================================================
 // ADMIN LOGIN
 // ============================================================
 
-// POST /api/admin/login
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
 
@@ -433,7 +387,6 @@ app.post('/api/admin/login', (req, res) => {
   res.json({ token });
 });
 
-// GET /api/users — admin-only (no public route exists for user accounts)
 app.get('/api/users', requireAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -449,7 +402,7 @@ app.get('/api/users', requireAdmin, async (req, res) => {
 app.get('/api/users/:id', requireAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, full_name, email, role, location, created_at FROM users WHERE id = ?',
+      'SELECT id, full_name, email, role, location, created_at FROM users WHERE id = $1',
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
@@ -460,13 +413,10 @@ app.get('/api/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// GET /api/public-profile/:id — PUBLIC, minimal lookup so the dashboard
-// can show a counterpart's name in listings/orders/chats without
-// exposing the full users table (no email, no password_hash).
 app.get('/api/public-profile/:id', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, full_name, role, location FROM users WHERE id = ?',
+      'SELECT id, full_name, role, location FROM users WHERE id = $1',
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
@@ -481,9 +431,8 @@ app.get('/api/public-profile/:id', async (req, res) => {
 // PUBLIC GET ROUTES — every table except users
 // ============================================================
 for (const table of Object.keys(TABLES)) {
-  if (table === 'users') continue; // no public read access to user accounts
+  if (table === 'users') continue;
 
-  // GET /api/<table>
   app.get(`/api/${table}`, async (req, res) => {
     try {
       const { rows } = await pool.query(`SELECT * FROM ${table} ORDER BY id DESC`);
@@ -494,10 +443,9 @@ for (const table of Object.keys(TABLES)) {
     }
   });
 
-  // GET /api/<table>/:id
   app.get(`/api/${table}/:id`, async (req, res) => {
     try {
-      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
+      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = $1`, [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
       res.json(rows[0]);
     } catch (err) {
@@ -508,11 +456,9 @@ for (const table of Object.keys(TABLES)) {
 }
 
 // ============================================================
-// ADMIN-PROTECTED WRITE ROUTES — POST / PUT / DELETE for every
-// table, including users.
+// ADMIN-PROTECTED WRITE ROUTES
 // ============================================================
 for (const [table, config] of Object.entries(TABLES)) {
-  // POST /api/<table>
   app.post(`/api/${table}`, requireAdmin, async (req, res) => {
     try {
       const data = pickFields(req.body, config.insertable);
@@ -529,17 +475,14 @@ for (const [table, config] of Object.entries(TABLES)) {
       }
 
       const { sql, values } = buildInsert(table, data);
-      const [result] = await pool.query(sql, values);
-      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [result.insertId]);
+      const { rows } = await pool.query(sql, values);
+      const newRow = rows[0];
 
-      if (table === 'users') delete rows[0].password_hash;
-      res.status(201).json(rows[0]);
+      if (table === 'users') delete newRow.password_hash;
+      res.status(201).json(newRow);
 
-      // Fire the buyer-notification email AFTER responding — a slow
-      // or failing email send should never delay or break the API
-      // response for the person who just created the listing.
       if (table === 'produce_listings') {
-        notifyBuyersOfNewListing(rows[0]).catch((err) =>
+        notifyBuyersOfNewListing(newRow).catch((err) =>
           console.error('notifyBuyersOfNewListing failed:', err)
         );
       }
@@ -549,7 +492,6 @@ for (const [table, config] of Object.entries(TABLES)) {
     }
   });
 
-  // PUT /api/<table>/:id
   app.put(`/api/${table}/:id`, requireAdmin, async (req, res) => {
     try {
       const data = pickFields(req.body, config.insertable);
@@ -563,23 +505,22 @@ for (const [table, config] of Object.entries(TABLES)) {
       }
 
       const { sql, values } = buildUpdate(table, data, req.params.id);
-      const [result] = await pool.query(sql, values);
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
+      const { rows, rowCount } = await pool.query(sql, values);
+      if (rowCount === 0) return res.status(404).json({ error: 'Not found' });
 
-      const { rows } = await pool.query(`SELECT * FROM ${table} WHERE id = ?`, [req.params.id]);
-      if (table === 'users') delete rows[0].password_hash;
-      res.json(rows[0]);
+      const updatedRow = rows[0];
+      if (table === 'users') delete updatedRow.password_hash;
+      res.json(updatedRow);
     } catch (err) {
       console.error(`PUT /api/${table}/:id error:`, err);
       res.status(500).json({ error: `Failed to update ${table} row` });
     }
   });
 
-  // DELETE /api/<table>/:id
   app.delete(`/api/${table}/:id`, requireAdmin, async (req, res) => {
     try {
-      const [result] = await pool.query(`DELETE FROM ${table} WHERE id = ?`, [req.params.id]);
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Not found' });
+      const { rowCount } = await pool.query(`DELETE FROM ${table} WHERE id = $1`, [req.params.id]);
+      if (rowCount === 0) return res.status(404).json({ error: 'Not found' });
       res.status(204).send();
     } catch (err) {
       console.error(`DELETE /api/${table}/:id error:`, err);
