@@ -11,7 +11,13 @@ const cors = require('cors');
 const nodemailer = require('nodemailer');
 
 const app = express();
-app.use(cors({origin:"https://agrovite-new-2.onrender.com"}));
+app.use(cors({
+  origin: [
+    "https://agrovite-frontend-4.onrender.com",
+    "https://agrovite-new-2.onrender.com"
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 
