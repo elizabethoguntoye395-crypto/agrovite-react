@@ -105,6 +105,24 @@ function generateOtp() {
 
 const resendConfigured = !!process.env.RESEND_API_KEY;
 const resend = resendConfigured ? new Resend(process.env.RESEND_API_KEY) : null;
+
+async function sendMail({ to, subject, text, html }) {
+  if (!resend) {
+    console.log(`[DEV — no Resend key configured] Email to ${to} — ${subject}\n${text}`);
+    return;
+  }
+  const { error } = await resend.emails.send({
+    from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+    to,
+    subject,
+    text,
+    html,
+  });
+  if (error) {
+    console.error('Resend send error:', error);
+    throw new Error('Failed to send email');
+  }
+}
 async function sendOtpEmail(email, code) {
   await sendMail({
     to: email,
