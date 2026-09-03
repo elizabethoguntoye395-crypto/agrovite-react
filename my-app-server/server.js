@@ -103,8 +103,22 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+<<<<<<< HEAD
 const resendConfigured = !!process.env.RESEND_API_KEY;
 const resend = resendConfigured ? new Resend(process.env.RESEND_API_KEY) : null;
+=======
+const smtpConfigured = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS;
+const transporter = smtpConfigured
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: Number(process.env.SMTP_PORT) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      family: 4,
+    })
+  : null;
+
+>>>>>>> f43a35e491849e67e0056cfe99543ad946d0a026
 async function sendMail({ to, subject, text, html }) {
   if (!resend) {
     console.log(`[DEV — no Resend key configured] Email to ${to} — ${subject}\n${text}`);
