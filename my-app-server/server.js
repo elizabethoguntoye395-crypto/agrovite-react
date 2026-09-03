@@ -8,7 +8,7 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend')
 
 const app = express();
 app.use(cors({
@@ -103,24 +103,25 @@ function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-const smtpConfigured = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS;
-const transporter = smtpConfigured
-  ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: Number(process.env.SMTP_PORT) === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    })
-  : null;
-
+const resendConfigured = !!process.env.RESEND_API_KEY;
+const resend = resendConfigured ? new Resend(process.env.RESEND_API_KEY) : null;
 async function sendMail({ to, subject, text, html }) {
-  if (!transporter) {
-    console.log(`[DEV — no SMTP configured] Email to ${to} — ${subject}\n${text}`);
+  if (!resend) {
+    console.log(`[DEV — no Resend key configured] Email to ${to} — ${subject}\n${text}`);
     return;
   }
-  await transporter.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, text, html });
+  const { error } = await resend.emails.send({
+    from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+    to,
+    subject,
+    text,
+    html,
+  });
+  if (error) {
+    console.error('Resend send error:', error);
+    throw new Error('Failed to send email');
+  }
 }
-
 async function sendOtpEmail(email, code) {
   await sendMail({
     to: email,
